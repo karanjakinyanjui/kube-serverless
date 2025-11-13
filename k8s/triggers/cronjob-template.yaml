@@ -1,0 +1,26 @@
+apiVersion: batch/v1
+kind: CronJob
+metadata:
+  name: FUNCTION_NAME-cron
+  namespace: kube-serverless
+  labels:
+    app.kubernetes.io/name: FUNCTION_NAME
+    app.kubernetes.io/managed-by: kube-serverless
+    trigger-type: cron
+spec:
+  schedule: "CRON_SCHEDULE"
+  jobTemplate:
+    spec:
+      template:
+        spec:
+          containers:
+          - name: trigger
+            image: curlimages/curl:latest
+            command:
+            - sh
+            - -c
+            - |
+              curl -X POST http://FUNCTION_NAME.kube-serverless.svc.cluster.local/invoke \
+                -H "Content-Type: application/json" \
+                -d '{"trigger": "cron", "timestamp": "'$(date -Iseconds)'"}'
+          restartPolicy: OnFailure

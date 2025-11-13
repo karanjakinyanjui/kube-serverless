@@ -1,0 +1,11 @@
+apiVersion: v1
+kind: ConfigMap
+metadata:
+  name: kube-serverless-config
+  namespace: kube-serverless
+data:
+  scaleToZeroTimeout: "300"  # 5 minutes
+  defaultMinReplicas: "0"
+  defaultMaxReplicas: "10"
+  metricsRetentionDays: "30"
+  coldStartThreshold: "5000"  # 5 seconds in ms

@@ -1,0 +1,10 @@
+name: webhook-handler
+runtime: go119
+handler: Handler
+minReplicas: 1
+maxReplicas: 20
+codeFile: go-webhook.go
+triggers:
+  - type: http
+    config:
+      path: /webhook

@@ -1,0 +1,138 @@
+# Message Queue Integration using RabbitMQ as an example
+apiVersion: apps/v1
+kind: Deployment
+metadata:
+  name: rabbitmq
+  namespace: kube-serverless
+spec:
+  replicas: 1
+  selector:
+    matchLabels:
+      app: rabbitmq
+  template:
+    metadata:
+      labels:
+        app: rabbitmq
+    spec:
+      containers:
+      - name: rabbitmq
+        image: rabbitmq:3-management-alpine
+        ports:
+        - containerPort: 5672
+          name: amqp
+        - containerPort: 15672
+          name: management
+        env:
+        - name: RABBITMQ_DEFAULT_USER
+          value: admin
+        - name: RABBITMQ_DEFAULT_PASS
+          value: admin
+---
+apiVersion: v1
+kind: Service
+metadata:
+  name: rabbitmq
+  namespace: kube-serverless
+spec:
+  type: ClusterIP
+  ports:
+  - port: 5672
+    targetPort: 5672
+    name: amqp
+  - port: 15672
+    targetPort: 15672
+    name: management
+  selector:
+    app: rabbitmq
+---
+# Consumer deployment that triggers functions based on queue messages
+apiVersion: apps/v1
+kind: Deployment
+metadata:
+  name: queue-consumer
+  namespace: kube-serverless
+spec:
+  replicas: 1
+  selector:
+    matchLabels:
+      app: queue-consumer
+  template:
+    metadata:
+      labels:
+        app: queue-consumer
+    spec:
+      containers:
+      - name: consumer
+        image: python:3.9-alpine
+        command:
+        - sh
+        - -c
+        - |
+          pip install pika requests
+          python -u /scripts/consumer.py
+        env:
+        - name: RABBITMQ_HOST
+          value: rabbitmq
+        - name: RABBITMQ_PORT
+          value: "5672"
+        - name: RABBITMQ_USER
+          value: admin
+        - name: RABBITMQ_PASS
+          value: admin
+        volumeMounts:
+        - name: scripts
+          mountPath: /scripts
+      volumes:
+      - name: scripts
+        configMap:
+          name: queue-consumer-script
+---
+apiVersion: v1
+kind: ConfigMap
+metadata:
+  name: queue-consumer-script
+  namespace: kube-serverless
+data:
+  consumer.py: |
+    import pika
+    import requests
+    import json
+    import os
+
+    rabbitmq_host = os.getenv('RABBITMQ_HOST', 'rabbitmq')
+    rabbitmq_port = int(os.getenv('RABBITMQ_PORT', 5672))
+    rabbitmq_user = os.getenv('RABBITMQ_USER', 'admin')
+    rabbitmq_pass = os.getenv('RABBITMQ_PASS', 'admin')
+
+    credentials = pika.PlainCredentials(rabbitmq_user, rabbitmq_pass)
+    connection = pika.BlockingConnection(
+        pika.ConnectionParameters(host=rabbitmq_host, port=rabbitmq_port, credentials=credentials)
+    )
+    channel = connection.channel()
+
+    # Declare exchange for function triggers
+    channel.exchange_declare(exchange='function-triggers', exchange_type='topic', durable=True)
+
+    def callback(ch, method, properties, body):
+        try:
+            message = json.loads(body)
+            function_name = method.routing_key.replace('function.', '')
+
+            url = f"http://{function_name}.kube-serverless.svc.cluster.local/invoke"
+            response = requests.post(url, json=message)
+
+            print(f"Triggered function {function_name}: {response.status_code}")
+            ch.basic_ack(delivery_tag=method.delivery_tag)
+        except Exception as e:
+            print(f"Error processing message: {e}")
+            ch.basic_nack(delivery_tag=method.delivery_tag, requeue=True)
+
+    # Bind to all function queues
+    result = channel.queue_declare(queue='', exclusive=True)
+    queue_name = result.method.queue
+
+    channel.queue_bind(exchange='function-triggers', queue=queue_name, routing_key='function.*')
+    channel.basic_consume(queue=queue_name, on_message_callback=callback)
+
+    print('Queue consumer started. Waiting for messages...')
+    channel.start_consuming()
