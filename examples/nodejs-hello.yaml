@@ -1,0 +1,10 @@
+name: hello-nodejs
+runtime: nodejs18
+handler: index.handler
+minReplicas: 0
+maxReplicas: 10
+codeFile: nodejs-hello.js
+triggers:
+  - type: http
+    config:
+      path: /hello

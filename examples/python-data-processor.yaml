@@ -1,0 +1,10 @@
+name: data-processor
+runtime: python39
+handler: handler
+minReplicas: 0
+maxReplicas: 5
+codeFile: python-data-processor.py
+triggers:
+  - type: cron
+    config:
+      schedule: "0 */6 * * *"  # Every 6 hours
